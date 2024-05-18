@@ -3,6 +3,7 @@ import numpy as np
 import math
 import torch
 import pyrender
+from pyrender.shader_program import ShaderProgramCache
 import open3d as o3d
 import trimesh
 import cv2
@@ -84,6 +85,20 @@ class Scene:
     def getTestCameras(self, scale=1.0):
         return self.test_cameras[scale]
 
+
+class CustomShaderCache():
+    def __init__(self):
+        self.program = None
+
+    def get_program(self, vertex_shader, fragment_shader, geometry_shader=None, defines=None):
+        if self.program is None:
+            self.program = pyrender.shader_program.ShaderProgram("shaders/mesh.vert", "shaders/mesh.frag", defines=defines)
+        return self.program
+
+    def clear(self):
+        del self.program
+
+
 class PyRenderScene:
     def __init__(self, viewpoint_camera):
         # Set up rasterization configuration
@@ -117,14 +132,16 @@ class PyRenderScene:
         r = pyrender.OffscreenRenderer(
             viewport_width=image_width, viewport_height=image_height
         )
+        # r._renderer._program_cache = ShaderProgramCache(shader_dir="shaders")
+        r._renderer._program_cache = CustomShaderCache()
 
         self.r = r
 
     def __del__(self):
         self.r.delete()
 
-    def render(self):
-        return self.r.render(self.scene)
+    def render(self, **kwargs):
+        return self.r.render(self.scene, **kwargs)
 
     def load_mesh(self, mesh_filename):
         trimesh_mesh = trimesh.load(str(mesh_filename))
@@ -181,13 +198,17 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline):
     render_path = Path(model_path) / name / f"ours_{iteration}" / "mesh_renders"
     render_path.mkdir(parents=True, exist_ok=True)
 
+    normal_path = Path(model_path) / name / f"ours_{iteration}" / "mesh_normals"
+    normal_path.mkdir(parents=True, exist_ok=True)
+
     pose_mesh = o3d.geometry.TriangleMesh()
 
     renderer = PyRenderScene(views[0])
     renderer.load_mesh(mesh_path)
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        T_wc = (view.world_view_transform.T).inverse()
+        T_cw = view.world_view_transform.T
+        T_wc = T_cw.inverse()
         renderer.set_camera_pose(T_wc.cpu().numpy())
 
         # T = T_wc.cpu().numpy()
@@ -196,6 +217,23 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline):
 
         rendered_color, _ = renderer.render()
         cv2.imwrite(str(render_path / f"{idx:05d}.png"), rendered_color)
+
+        normals, _ = renderer.render(flags=pyrender.RenderFlags.NONE | pyrender.RenderFlags.FACE_NORMALS)
+        background = (normals[..., 0] == 255) & (normals[..., 1] == 255) & (normals[..., 2] == 255)
+        normals = normals.reshape(-1, 3).astype(float) / 255.0
+        normals = (2 * normals) - 1
+
+        normals = normals @ T_wc[:3, :3].cpu().numpy()
+
+        normals = normals.reshape(*rendered_color.shape)
+        normals = (-normals * 0.5) + 0.5
+        normals = (normals * 255).astype(np.uint8)
+        normals[background] = 255
+
+        normals = normals[..., ::-1]
+
+        cv2.imwrite(str(normal_path / f"{idx:05d}.png"), normals)
+
 
     o3d.io.write_triangle_mesh("/tmp/pose_mesh.ply", pose_mesh)
 

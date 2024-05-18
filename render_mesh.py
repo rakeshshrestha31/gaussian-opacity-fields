@@ -128,6 +128,19 @@ class PyRenderScene:
 
     def load_mesh(self, mesh_filename):
         trimesh_mesh = trimesh.load(str(mesh_filename))
+
+        # Remove vertex colors
+        if hasattr(trimesh_mesh.visual, 'vertex_colors'):
+            trimesh_mesh.visual.vertex_colors = None
+
+        # Remove face colors
+        if hasattr(trimesh_mesh.visual, 'face_colors'):
+            trimesh_mesh.visual.face_colors = None
+
+        # Remove texture/material
+        if hasattr(trimesh_mesh.visual, 'material'):
+            trimesh_mesh.visual.material = None
+
         trimesh.repair.fix_normals(trimesh_mesh, multibody=True)
         pyrender_mesh = pyrender.Mesh.from_trimesh(trimesh_mesh, smooth=False)
         mesh_node = self.scene.add(pyrender_mesh)
@@ -143,7 +156,7 @@ class PyRenderScene:
 
         self.cam_node = self.scene.add(self.intrinsic_cam, pose=T)
 
-        direc_l = pyrender.DirectionalLight(color=np.ones(3), intensity=10.0)
+        direc_l = pyrender.DirectionalLight(color=np.ones(3), intensity=5.0)
         spot_l = pyrender.SpotLight(color=np.ones(3), intensity=5.0,
                            innerConeAngle=np.pi/16*0.1, outerConeAngle=np.pi/6*0.1)
         point_l = pyrender.PointLight(color=np.ones(3), intensity=10.0)
@@ -162,7 +175,9 @@ class PyRenderScene:
 
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline):
-    mesh_path = os.path.join(model_path, name, f"ours_{iteration}", "fusion", "mesh_binary_search_7.ply")
+    # mesh_path = os.path.join(model_path, name, f"ours_{iteration}", "fusion", "mesh_binary_search_7.ply")
+    mesh_path = os.path.join(model_path, "test", f"ours_{iteration}", "tsdf", "tsdf.ply")
+
     render_path = Path(model_path) / name / f"ours_{iteration}" / "mesh_renders"
     render_path.mkdir(parents=True, exist_ok=True)
 
@@ -190,6 +205,7 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
     gaussians = None  # GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
 
+    # render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline)
     render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline)
 
 
